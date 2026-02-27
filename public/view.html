@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sensor Calibration - Live View</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      min-height: 100vh;
+      background: radial-gradient(circle at top right, #e2f2ff 0%, #f8fcff 45%, #eff8ff 100%);
+    }
+    .card-soft {
+      border: 0;
+      border-radius: 1rem;
+      box-shadow: 0 12px 30px rgba(25, 135, 84, 0.13);
+    }
+    #qrcode img {
+      max-width: 100%;
+      height: auto;
+      margin: 0 auto;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <main class="container py-4 py-md-5">
+    <div class="row g-4 align-items-start">
+      <div class="col-12 col-lg-4">
+        <div class="card card-soft p-3 p-md-4 h-100">
+          <h1 class="h4 fw-bold text-success">Class Live View</h1>
+          <p class="text-secondary mb-3">Scan to open the student submit page.</p>
+          <div id="qrcode" class="bg-white p-2 rounded border"></div>
+          <div class="small text-muted mt-2" id="qrUrl"></div>
+        </div>
+      </div>
+
+      <div class="col-12 col-lg-8">
+        <div class="card card-soft p-3 p-md-4">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <h2 class="h5 mb-0 fw-bold">Submitted Lines</h2>
+            <div class="d-flex align-items-center gap-2">
+              <span id="countBadge" class="badge text-bg-success" role="button" style="cursor:pointer;">0 students</span>
+              <button id="clearAllBtn" type="button" class="btn btn-danger btn-sm d-none">Clear All</button>
+            </div>
+          </div>
+          <div id="adminStatus" class="alert alert-info py-2 px-3 d-none" role="alert"></div>
+          <div class="table-responsive">
+            <table class="table table-striped table-hover align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>Name</th>
+                  <th>Slope (m)</th>
+                  <th>Intercept (b)</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody id="rows">
+                <tr>
+                  <td colspan="4" class="text-center text-muted py-4">Waiting for submissions...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="/firebase-config.js"></script>
+  <script>
+    (function () {
+      const rows = document.getElementById('rows');
+      const countBadge = document.getElementById('countBadge');
+      const clearAllBtn = document.getElementById('clearAllBtn');
+      const adminStatus = document.getElementById('adminStatus');
+      const qrContainer = document.getElementById('qrcode');
+      const qrUrlText = document.getElementById('qrUrl');
+
+      const rootUrl = new URL('./', window.location.href).href;
+      qrUrlText.textContent = rootUrl;
+      new QRCode(qrContainer, {
+        text: rootUrl,
+        width: 240,
+        height: 240,
+        correctLevel: QRCode.CorrectLevel.H
+      });
+
+      if (!window.firebaseConfig || !window.firebaseConfig.databaseURL) {
+        rows.innerHTML = '<tr><td colspan="4" class="text-center text-danger py-4">Missing Firebase config. Update firebase-config.js first.</td></tr>';
+        return;
+      }
+
+      firebase.initializeApp(window.firebaseConfig);
+      const db = firebase.database();
+      let clearEnabled = false;
+
+      countBadge.addEventListener('click', function () {
+        clearEnabled = !clearEnabled;
+        clearAllBtn.classList.toggle('d-none', !clearEnabled);
+      });
+
+      clearAllBtn.addEventListener('click', function () {
+        if (!window.confirm('Clear all student submissions?')) {
+          return;
+        }
+
+        clearAllBtn.disabled = true;
+        showAdminStatus('Clearing all submissions...', 'info');
+
+        db.ref('submissions')
+          .remove()
+          .then(function () {
+            showAdminStatus('All submissions were cleared.', 'success');
+          })
+          .catch(function (error) {
+            showAdminStatus('Failed to clear submissions: ' + error.message, 'danger');
+          })
+          .finally(function () {
+            clearAllBtn.disabled = false;
+          });
+      });
+
+      db.ref('submissions').on('value', function (snapshot) {
+        const value = snapshot.val() || {};
+        const entries = Object.values(value)
+          .filter(function (item) {
+            return item && typeof item.name === 'string' && Number.isFinite(Number(item.m)) && Number.isFinite(Number(item.b));
+          })
+          .map(function (item) {
+            return {
+              name: item.name,
+              m: Number(item.m),
+              b: Number(item.b),
+              updatedAt: Number(item.updatedAt) || 0
+            };
+          })
+          .sort(function (a, b) {
+            return b.updatedAt - a.updatedAt;
+          });
+
+        countBadge.textContent = entries.length + ' student' + (entries.length === 1 ? '' : 's');
+
+        if (entries.length === 0) {
+          rows.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Waiting for submissions...</td></tr>';
+          return;
+        }
+
+        rows.innerHTML = entries.map(function (entry) {
+          const updated = entry.updatedAt ? new Date(entry.updatedAt).toLocaleTimeString() : '-';
+          return '<tr>' +
+            '<td class="fw-semibold">' + escapeHtml(entry.name) + '</td>' +
+            '<td>' + format(entry.m) + '</td>' +
+            '<td>' + format(entry.b) + '</td>' +
+            '<td>' + updated + '</td>' +
+          '</tr>';
+        }).join('');
+      });
+
+      function format(n) {
+        return Number(n).toFixed(4).replace(/\.?0+$/, '');
+      }
+
+      function escapeHtml(text) {
+        return text
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      function showAdminStatus(message, type) {
+        adminStatus.className = 'alert py-2 px-3 alert-' + type;
+        adminStatus.textContent = message;
+      }
+    })();
+  </script>
+</body>
+</html>
