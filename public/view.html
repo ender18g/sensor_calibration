@@ -52,12 +52,13 @@
                   <th>Name</th>
                   <th>Slope (m)</th>
                   <th>Intercept (b)</th>
+                  <th>Color</th>
                   <th>Updated</th>
                 </tr>
               </thead>
               <tbody id="rows">
                 <tr>
-                  <td colspan="4" class="text-center text-muted py-4">Waiting for submissions...</td>
+                  <td colspan="5" class="text-center text-muted py-4">Waiting for submissions...</td>
                 </tr>
               </tbody>
             </table>
@@ -70,7 +71,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <script src="/firebase-config.js"></script>
+  <script src="./firebase-config.js"></script>
   <script>
     (function () {
       const rows = document.getElementById('rows');
@@ -90,7 +91,7 @@
       });
 
       if (!window.firebaseConfig || !window.firebaseConfig.databaseURL) {
-        rows.innerHTML = '<tr><td colspan="4" class="text-center text-danger py-4">Missing Firebase config. Update firebase-config.js first.</td></tr>';
+        rows.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-4">Missing Firebase config. Update firebase-config.js first.</td></tr>';
         return;
       }
 
@@ -131,10 +132,12 @@
             return item && typeof item.name === 'string' && Number.isFinite(Number(item.m)) && Number.isFinite(Number(item.b));
           })
           .map(function (item) {
+            const color = typeof item.color === 'string' && isValidHexColor(item.color) ? item.color.toLowerCase() : '#6c757d';
             return {
               name: item.name,
               m: Number(item.m),
               b: Number(item.b),
+              color: color,
               updatedAt: Number(item.updatedAt) || 0
             };
           })
@@ -145,16 +148,18 @@
         countBadge.textContent = entries.length + ' student' + (entries.length === 1 ? '' : 's');
 
         if (entries.length === 0) {
-          rows.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Waiting for submissions...</td></tr>';
+          rows.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Waiting for submissions...</td></tr>';
           return;
         }
 
         rows.innerHTML = entries.map(function (entry) {
           const updated = entry.updatedAt ? new Date(entry.updatedAt).toLocaleTimeString() : '-';
+          const swatch = '<span class="d-inline-block rounded border me-2" style="width:16px;height:16px;background:' + entry.color + ';vertical-align:text-bottom;"></span>';
           return '<tr>' +
             '<td class="fw-semibold">' + escapeHtml(entry.name) + '</td>' +
             '<td>' + format(entry.m) + '</td>' +
             '<td>' + format(entry.b) + '</td>' +
+            '<td>' + swatch + '<code>' + entry.color + '</code></td>' +
             '<td>' + updated + '</td>' +
           '</tr>';
         }).join('');
@@ -171,6 +176,10 @@
           .replace(/>/g, '&gt;')
           .replace(/"/g, '&quot;')
           .replace(/'/g, '&#039;');
+      }
+
+      function isValidHexColor(color) {
+        return /^#[0-9a-f]{6}$/i.test(String(color));
       }
 
       function showAdminStatus(message, type) {

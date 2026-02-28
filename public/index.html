@@ -19,6 +19,14 @@
       max-width: 560px;
       margin: 0 auto;
     }
+    .stepper-btn {
+      min-width: 3rem;
+      font-size: 1.2rem;
+      line-height: 1;
+      touch-action: manipulation;
+      -webkit-user-select: none;
+      user-select: none;
+    }
   </style>
 </head>
 <body>
@@ -39,14 +47,27 @@
 
           <div class="mb-3">
             <label for="slope" class="form-label fw-semibold">Slope (m)</label>
-            <input id="slope" name="slope" class="form-control form-control-lg" type="number" step="any" required>
+            <div class="input-group">
+              <button id="slopeDownBtn" class="btn btn-outline-secondary stepper-btn" type="button" aria-label="Decrease slope">-</button>
+              <input id="slope" name="slope" class="form-control form-control-lg text-center" type="number" inputmode="decimal" step="0.1" required>
+              <button id="slopeUpBtn" class="btn btn-outline-secondary stepper-btn" type="button" aria-label="Increase slope">+</button>
+            </div>
             <div class="invalid-feedback">Please enter a valid slope.</div>
           </div>
 
           <div class="mb-4">
             <label for="intercept" class="form-label fw-semibold">Vertical Intercept (b)</label>
-            <input id="intercept" name="intercept" class="form-control form-control-lg" type="number" step="any" required>
+            <div class="input-group">
+              <button id="interceptDownBtn" class="btn btn-outline-secondary stepper-btn" type="button" aria-label="Decrease intercept">-</button>
+              <input id="intercept" name="intercept" class="form-control form-control-lg text-center" type="number" inputmode="decimal" step="0.1" required>
+              <button id="interceptUpBtn" class="btn btn-outline-secondary stepper-btn" type="button" aria-label="Increase intercept">+</button>
+            </div>
             <div class="invalid-feedback">Please enter a valid intercept.</div>
+          </div>
+
+          <div class="mb-4">
+            <label for="lineColor" class="form-label fw-semibold">Line Color</label>
+            <input id="lineColor" name="lineColor" class="form-control form-control-color" type="color" value="#0d6efd" title="Choose your line color">
           </div>
 
           <div class="d-grid gap-2">
@@ -63,19 +84,30 @@
 
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
-  <script src="/firebase-config.js"></script>
+  <script src="./firebase-config.js"></script>
   <script>
     (function () {
       const form = document.getElementById('studentForm');
       const firstNameInput = document.getElementById('firstName');
       const slopeInput = document.getElementById('slope');
       const interceptInput = document.getElementById('intercept');
+      const lineColorInput = document.getElementById('lineColor');
+      const slopeDownBtn = document.getElementById('slopeDownBtn');
+      const slopeUpBtn = document.getElementById('slopeUpBtn');
+      const interceptDownBtn = document.getElementById('interceptDownBtn');
+      const interceptUpBtn = document.getElementById('interceptUpBtn');
       const submitBtn = document.getElementById('submitBtn');
       const resubmitBtn = document.getElementById('resubmitBtn');
       const statusBox = document.getElementById('statusBox');
 
       const STORAGE_KEY = 'calibrationStudentName';
+      const COLOR_STORAGE_KEY = 'calibrationLineColor';
       const submissionsPath = 'submissions';
+      const AUTO_RESUBMIT_DEBOUNCE_MS = 1000;
+      let hasSubmittedOnce = false;
+      let isSubmitting = false;
+      let pendingAutoSubmit = false;
+      let autoSubmitTimer = null;
 
       if (!window.firebaseConfig || !window.firebaseConfig.databaseURL) {
         showStatus('Missing Firebase config. Update firebase-config.js first.', 'danger');
@@ -91,31 +123,78 @@
       if (savedName) {
         firstNameInput.value = savedName;
       }
+      const savedColor = localStorage.getItem(COLOR_STORAGE_KEY);
+      if (savedColor && isValidHexColor(savedColor)) {
+        lineColorInput.value = savedColor;
+      }
 
       form.addEventListener('submit', function (event) {
         event.preventDefault();
-        submitEntry();
+        submitEntry({ isAuto: false });
       });
 
       resubmitBtn.addEventListener('click', function () {
-        submitEntry();
+        submitEntry({ isAuto: false });
       });
 
-      function submitEntry() {
+      slopeInput.addEventListener('input', queueAutoResubmit);
+      interceptInput.addEventListener('input', queueAutoResubmit);
+      lineColorInput.addEventListener('input', queueAutoResubmit);
+      lineColorInput.addEventListener('change', queueAutoResubmit);
+      slopeDownBtn.addEventListener('click', function () { bumpNumberInput(slopeInput, -1); });
+      slopeUpBtn.addEventListener('click', function () { bumpNumberInput(slopeInput, 1); });
+      interceptDownBtn.addEventListener('click', function () { bumpNumberInput(interceptInput, -1); });
+      interceptUpBtn.addEventListener('click', function () { bumpNumberInput(interceptInput, 1); });
+      [slopeDownBtn, slopeUpBtn, interceptDownBtn, interceptUpBtn].forEach(function (btn) {
+        btn.addEventListener('dblclick', function (event) {
+          event.preventDefault();
+        });
+      });
+
+      function queueAutoResubmit() {
+        if (!hasSubmittedOnce) {
+          return;
+        }
+
+        if (autoSubmitTimer) {
+          clearTimeout(autoSubmitTimer);
+        }
+
+        autoSubmitTimer = setTimeout(function () {
+          submitEntry({ isAuto: true });
+        }, AUTO_RESUBMIT_DEBOUNCE_MS);
+      }
+
+      function submitEntry(options) {
+        const opts = options || {};
+        const isAuto = Boolean(opts.isAuto);
+
+        if (isSubmitting) {
+          if (hasSubmittedOnce) {
+            pendingAutoSubmit = true;
+          }
+          return;
+        }
+
         const firstName = firstNameInput.value.trim();
         const m = Number(slopeInput.value);
         const b = Number(interceptInput.value);
+        const color = lineColorInput.value.trim().toLowerCase();
 
         const validName = firstName.length > 0;
         const validSlope = Number.isFinite(m);
         const validIntercept = Number.isFinite(b);
+        const validColor = isValidHexColor(color);
 
         toggleInvalid(firstNameInput, !validName);
         toggleInvalid(slopeInput, !validSlope);
         toggleInvalid(interceptInput, !validIntercept);
+        toggleInvalid(lineColorInput, !validColor);
 
-        if (!validName || !validSlope || !validIntercept) {
-          showStatus('Please complete all fields with valid numbers.', 'warning');
+        if (!validName || !validSlope || !validIntercept || !validColor) {
+          if (!isAuto) {
+            showStatus('Please complete all fields with valid values.', 'warning');
+          }
           return;
         }
 
@@ -124,32 +203,56 @@
           name: firstName,
           m: m,
           b: b,
+          color: color,
           updatedAt: Date.now()
         };
 
+        isSubmitting = true;
         submitBtn.disabled = true;
         resubmitBtn.disabled = true;
-        showStatus('Submitting...', 'info');
+        showStatus(isAuto ? 'Auto-saving...' : 'Submitting...', 'info');
 
         db.ref(submissionsPath + '/' + key)
           .set(payload)
           .then(function () {
             localStorage.setItem(STORAGE_KEY, firstName);
+            localStorage.setItem(COLOR_STORAGE_KEY, color);
+            hasSubmittedOnce = true;
             firstNameInput.setAttribute('readonly', 'readonly');
             submitBtn.classList.add('d-none');
-            resubmitBtn.disabled = false;
-            showStatus('Submitted successfully. You can update m and b using Resubmit.', 'success');
+            resubmitBtn.classList.add('d-none');
+            showStatus(isAuto ? 'Saved.' : 'Submitted successfully. Updates now save automatically.', 'success');
           })
           .catch(function (error) {
             showStatus('Submission failed: ' + error.message, 'danger');
           })
           .finally(function () {
+            isSubmitting = false;
             submitBtn.disabled = false;
+
+            if (pendingAutoSubmit) {
+              pendingAutoSubmit = false;
+              queueAutoResubmit();
+            }
           });
       }
 
       function sanitizeKey(text) {
         return text.replace(/[.#$\[\]/]/g, '_').replace(/\s+/g, '_');
+      }
+
+      function bumpNumberInput(inputEl, direction) {
+        const step = Number(inputEl.step) || 0.1;
+        const decimals = Math.max(0, (String(step).split('.')[1] || '').length);
+        const current = Number(inputEl.value);
+        const base = Number.isFinite(current) ? current : 0;
+        const next = base + direction * step;
+        inputEl.value = next.toFixed(decimals);
+        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+
+      function isValidHexColor(color) {
+        return /^#[0-9a-f]{6}$/i.test(color);
       }
 
       function toggleInvalid(el, invalid) {
