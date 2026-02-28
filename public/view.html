@@ -154,12 +154,12 @@
 
         rows.innerHTML = entries.map(function (entry) {
           const updated = entry.updatedAt ? new Date(entry.updatedAt).toLocaleTimeString() : '-';
-          const swatch = '<span class="d-inline-block rounded border me-2" style="width:16px;height:16px;background:' + entry.color + ';vertical-align:text-bottom;"></span>';
+          const swatch = '<span class="d-inline-block rounded border" style="width:64px;height:22px;background:' + entry.color + ';"></span>';
           return '<tr>' +
             '<td class="fw-semibold">' + escapeHtml(entry.name) + '</td>' +
             '<td>' + format(entry.m) + '</td>' +
             '<td>' + format(entry.b) + '</td>' +
-            '<td>' + swatch + '<code>' + entry.color + '</code></td>' +
+            '<td>' + swatch + '</td>' +
             '<td>' + updated + '</td>' +
           '</tr>';
         }).join('');

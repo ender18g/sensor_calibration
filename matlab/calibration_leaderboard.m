@@ -19,11 +19,17 @@ endpoint = firebaseBaseUrl + "/submissions.json";
 pollSeconds = 1;
 ssePlotUpdateSeconds = 5;
 
+% Fallback line color for submissions that do not include a valid hex color.
 defaultColor = '#6c757d';
 
+% Build two figures:
+% 1) 2D calibration + student fit lines
+% 2) 3D SSE search history (m, b, SSE)
 f = figure('Name', 'Range Sensor Calibration Plot', 'Color', 'w', ...
     'WindowButtonDownFcn', @toggleLiveUpdates);
 f3d = figure('Name', 'SSE Search History', 'Color', 'w');
+
+% Store script state in figure appdata so callbacks/functions can share it.
 setappdata(f, 'liveUpdates', false);
 setappdata(f, 'needsRefresh', true);
 setappdata(f, 'last3dRefreshTime', -inf);
@@ -34,11 +40,14 @@ setappdata(f, 'peerFigure', f3d);
 setappdata(f3d, 'liveUpdates', false);
 setappdata(f3d, 'needsRefresh', true);
 
+% Main loop: runs until either figure is closed.
 while ishandle(f) && ishandle(f3d)
     liveUpdates = getappdata(f, 'liveUpdates');
     needsRefresh = getappdata(f, 'needsRefresh');
 
+    % Refresh on-demand or continuously while live mode is enabled.
     if needsRefresh || liveUpdates
+        % ----- 2D plot redraw -----
         clf(f);
         set(f, 'WindowButtonDownFcn', @toggleLiveUpdates);
         ax2d = axes(f);
@@ -69,8 +78,10 @@ while ishandle(f) && ishandle(f3d)
         end
         grid(ax2d, 'on');
 
+        % Pull current submissions and compute SSE ranking.
         studentRows = fetchAndRank(endpoint, voltages, heights, defaultColor);
 
+        % Add any new submissions/resubmissions to persistent 3D history.
         history = getappdata(f, 'sseHistory');
         seenHistoryKeys = getappdata(f, 'seenHistoryKeys');
         [history, seenHistoryKeys] = appendHistoryPoints(history, seenHistoryKeys, studentRows);
@@ -78,6 +89,7 @@ while ishandle(f) && ishandle(f3d)
         setappdata(f, 'seenHistoryKeys', seenHistoryKeys);
 
         if ~isempty(studentRows)
+            % Show best fits first (lowest SSE at top).
             topN = min(20, numel(studentRows));
             cmap = lines(topN);
 
@@ -89,6 +101,8 @@ while ishandle(f) && ishandle(f3d)
             for i = 1:topN
                 row = studentRows(i);
                 yFit = row.m .* xFit + row.b;
+
+                % Prefer each student's chosen color; fallback to palette.
                 [customColor, validColor] = parseHexColor(row.color);
                 if validColor
                     lineColor = customColor;
@@ -107,11 +121,13 @@ while ishandle(f) && ishandle(f3d)
             legend(ax2d, 'Collected Data', 'Location', 'northwest', 'FontSize', 12);
         end
 
+        % ----- 3D plot redraw (throttled) -----
         nowSeconds = posixtime(datetime('now'));
         last3dRefreshTime = getappdata(f, 'last3dRefreshTime');
         shouldRefresh3d = needsRefresh || (liveUpdates && (nowSeconds - last3dRefreshTime >= ssePlotUpdateSeconds));
 
         if shouldRefresh3d
+            % Preserve camera position so manual pan/rotate is not lost.
             camState = get3dCameraState(f3d);
 
             clf(f3d);
@@ -151,6 +167,7 @@ while ishandle(f) && ishandle(f3d)
             setappdata(f, 'last3dRefreshTime', nowSeconds);
         end
 
+        % Current frame is now up to date.
         setappdata(f, 'needsRefresh', false);
     end
 
@@ -160,6 +177,7 @@ while ishandle(f) && ishandle(f3d)
         break;
     end
 
+    % Run faster when live mode is active; idle slowly otherwise.
     liveUpdates = getappdata(f, 'liveUpdates');
     if liveUpdates
         pause(pollSeconds);
@@ -168,6 +186,7 @@ while ishandle(f) && ishandle(f3d)
     end
 end
 
+% Toggle live polling on mouse click and sync this state to the peer figure.
 function toggleLiveUpdates(src, ~)
     if ~ishandle(src)
         return;
@@ -200,6 +219,7 @@ function toggleLiveUpdates(src, ~)
     end
 end
 
+% Read Firebase submissions, validate fields, compute SSE, and return rows sorted by SSE.
 function rows = fetchAndRank(endpoint, voltages, heights, defaultColor)
     rows = struct('name', {}, 'm', {}, 'b', {}, 'sse', {}, 'color', {}, 'updatedAt', {}, 'submissionId', {});
 
@@ -279,6 +299,7 @@ function rows = fetchAndRank(endpoint, voltages, heights, defaultColor)
     end
 end
 
+% Append only unseen submission snapshots to history so 3D points persist over time.
 function [history, seenHistoryKeys] = appendHistoryPoints(history, seenHistoryKeys, studentRows)
     if isempty(studentRows)
         return;
@@ -308,6 +329,7 @@ function [history, seenHistoryKeys] = appendHistoryPoints(history, seenHistoryKe
     end
 end
 
+% Add symmetric padding around axis limits so points are not cramped.
 function lims = paddedLimits(values)
     minVal = min(values);
     maxVal = max(values);
@@ -321,10 +343,12 @@ function lims = paddedLimits(values)
     lims = [minVal - pad, maxVal + pad];
 end
 
+% Validate '#RRGGBB' format.
 function tf = isValidHexColor(color)
     tf = ~isempty(regexp(char(string(color)), '^#[0-9A-Fa-f]{6}$', 'once'));
 end
 
+% Convert '#RRGGBB' to MATLAB RGB triplet in [0,1].
 function [rgb, valid] = parseHexColor(color)
     colorText = char(string(color));
     valid = isValidHexColor(colorText);
@@ -337,6 +361,7 @@ function [rgb, valid] = parseHexColor(color)
     rgb = [hex2dec(colorText(2:3)), hex2dec(colorText(4:5)), hex2dec(colorText(6:7))] / 255;
 end
 
+% Capture current 3D camera settings from an existing figure.
 function camState = get3dCameraState(figHandle)
     camState = struct('hasState', false);
 
@@ -357,6 +382,7 @@ function camState = get3dCameraState(figHandle)
     camState.CameraViewAngle = ax.CameraViewAngle;
 end
 
+% Reapply prior camera settings after plot redraw.
 function apply3dCameraState(ax, camState)
     if ~isgraphics(ax, 'axes')
         return;
