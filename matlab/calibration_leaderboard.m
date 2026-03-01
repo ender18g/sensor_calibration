@@ -8,8 +8,8 @@ clc;
 close all;
 
 % Calibration data: Y = height (cm), X = voltage
-heights = [0, 1, 5, 9, 13, 15, 16, 17, 20.5, 21];
 voltages = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.4, 2.9, 3.1];
+heights = [0, 1, 5, 9, 13, 15, 16, 17, 20.5, 21];
 
 % TODO: Replace with your Firebase Realtime DB URL from firebase-config.js
 % Example: https://my-project-default-rtdb.firebaseio.com
@@ -154,13 +154,12 @@ while ishandle(f) && ishandle(f3d)
                         'MarkerSize', 6, 'MarkerFaceColor', rgb, 'MarkerEdgeColor', rgb, 'LineStyle', 'none');
                 end
 
-                mVals = [history.m];
-                bVals = [history.b];
-                sseVals = [history.sse];
-                xlim(ax3d, paddedLimits(mVals));
-                ylim(ax3d, paddedLimits(bVals));
-                zlim(ax3d, paddedLimits(sseVals));
             end
+
+            % Keep fixed search bounds for consistent comparison over time.
+            xlim(ax3d, [0, 15]);    % m (slope)
+            ylim(ax3d, [-10, 10]);  % b (intercept)
+            zlim(ax3d, [0, 800]);   % SSE
 
             apply3dCameraState(ax3d, camState);
             rotate3d(f3d, 'on');
