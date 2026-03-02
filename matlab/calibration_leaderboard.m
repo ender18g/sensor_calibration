@@ -111,7 +111,7 @@ while ishandle(f) && ishandle(f3d)
                 end
 
                 plot(ax2d, xFit, yFit, 'LineWidth', 1.5, 'Color', lineColor);
-                legendItems{i + 1} = sprintf('%s: %.1f', row.name, row.sse);
+                legendItems{i + 1} = sprintf('%s: %.2f', row.name, row.sse);
             end
 
             % Replot measured points on top so they remain visible over lines.
